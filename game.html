@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>DreamQuest: Maze Edition</title>
+  <style>
+    html,body{height:100%;margin:0;background:#05050a;color:#dfe9ff;font-family:monospace;overflow:hidden}
+    #game-container{margin:0 auto;touch-action:none}
+    .topbar{width:100%;text-align:center;padding:12px 0;color:#cfe6ff;font-size:14px;font-weight:bold;background:linear-gradient(180deg,#0a0a1f,transparent);text-shadow:0 0 10px #4a7fff}
+    .hint{width:100%;text-align:center;color:#9fbfff;font-size:11px;margin-top:6px;padding:0 20px}
+    .rotate-overlay{position:fixed;inset:0;background:#000;color:#fff;display:none;align-items:center;justify-content:center;z-index:9999}
+    .rotate-overlay.show{display:flex}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+</head>
+<body>
+  <div class="topbar">✨ DreamQuest: Maze Edition ✨</div>
+  <div id="game-container"></div>
+  <div class="hint">Navigate the maze • Defeat enemies • Reach the bed 🛏️ • Arrow keys or tap to move</div>
+  <div class="rotate-overlay" id="rotateOverlay"><div style="text-align:center;max-width:300px">Please rotate to <b>Portrait</b> 📱</div></div>
+
+<script>
+const CONFIG = {
+  tileSize: 16,
+  viewW: 320,
+  viewH: 480,
+  cols: 21,
+  rows: 31,
+  pixelArt: true,
+  messages: [
+    "You've done enough today 🌙",
+    "Take a deep breath — you're safe here",
+    "Proud of you — rest when you can",
+    "Time to rest 😴",
+    "Your dreams are waiting 💫",
+    "Almost there, keep going!",
+    "The bed awaits..."
+  ]
+};
+
+const mapW = CONFIG.cols * CONFIG.tileSize;
+const mapH = CONFIG.rows * CONFIG.tileSize;
+
+const game = new Phaser.Game({
+  type: Phaser.AUTO,
+  parent: 'game-container',
+  width: CONFIG.viewW,
+  height: CONFIG.viewH,
+  pixelArt: CONFIG.pixelArt,
+  backgroundColor: '#040408',
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+  physics: { default: 'arcade', arcade: { debug: false } },
+  scene: { preload, create, update }
+});
+
+let cursors, player, mapLayer, mapData, dpadButtons = {}, moving = false, msgText, bedPos, bedSprite;
+let enemies = [], boss, score = 0, scoreText, hpText, playerHP = 100;
+let particles, glowTween;
+
+function checkOrientation(){
+  const overlay = document.getElementById('rotateOverlay');
+  if(window.innerHeight < window.innerWidth){
+    overlay.classList.add('show');
+  } else {
+    overlay.classList.remove('show');
+  }
+}
+
+function generateMaze(cols, rows){
+  const maze = Array.from({length: rows}, ()=>Array(cols).fill(1));
+  const stack = [];
+  function inBounds(x,y){return x>0 && y>0 && x<cols-1 && y<rows-1;}
+  const startX=1, startY=1;
+  maze[startY][startX]=0;
+  stack.push([startX,startY]);
+  const dirs=[[0,-2],[2,0],[0,2],[-2,0]];
+  while(stack.length>0){
+    const [cx,cy] = stack[stack.length-1];
+    const neighbors = [];
+    dirs.forEach(([dx,dy])=>{
+      const nx=cx+dx, ny=cy+dy;
+      if(inBounds(nx,ny) && maze[ny][nx]===1) neighbors.push([nx,ny]);
+    });
+    if(neighbors.length===0){ stack.pop(); continue; }
+    const [nx,ny] = Phaser.Math.RND.pick(neighbors);
+    maze[(cy+ny)/2][(cx+nx)/2]=0;
+    maze[ny][nx]=0;
+    stack.push([nx,ny]);
+  }
+  return maze;
+}
+
+function createTileTextures(scene){
+  // Floor with pattern
+  const floorTex = scene.textures.createCanvas('floor', CONFIG.tileSize, CONFIG.tileSize);
+  const fCtx = floorTex.getContext();
+  fCtx.fillStyle='#1b1b20'; 
+  fCtx.fillRect(0,0,CONFIG.tileSize,CONFIG.tileSize);
+  fCtx.fillStyle='#26262d'; 
+  fCtx.fillRect(0,CONFIG.tileSize-4,CONFIG.tileSize,4);
+  fCtx.fillStyle='#15151a';
+  fCtx.fillRect(1,1,1,1);
+  fCtx.fillRect(14,14,1,1);
+
+  // Stone Wall
+  const wallTex = scene.textures.createCanvas('wall', CONFIG.tileSize, CONFIG.tileSize);
+  const wCtx = wallTex.getContext();
+  wCtx.fillStyle='#2f3035'; 
+  wCtx.fillRect(0,0,CONFIG.tileSize,CONFIG.tileSize);
+  wCtx.fillStyle='#3b3c44'; 
+  wCtx.fillRect(2,2,CONFIG.tileSize-4,CONFIG.tileSize-6);
+  wCtx.fillStyle='#25262a';
+  wCtx.fillRect(1,1,2,2);
+
+  // Glowing Bed
+  const bedTex = scene.textures.createCanvas('bed', CONFIG.tileSize, CONFIG.tileSize);
+  const bCtx = bedTex.getContext();
+  bCtx.fillStyle='#8ad3ff'; 
+  bCtx.fillRect(2,6,12,6);
+  bCtx.fillStyle='#ffffff'; 
+  bCtx.fillRect(2,3,10,3);
+  bCtx.fillStyle='#ffd6a5'; 
+  bCtx.fillRect(10,8,3,3);
+
+  // Chibi Player
+  const chibiTex = scene.textures.createCanvas('chibi', CONFIG.tileSize, CONFIG.tileSize);
+  const cCtx = chibiTex.getContext();
+  cCtx.fillStyle='#ffd6a5'; 
+  cCtx.fillRect(4,4,8,8);
+  cCtx.fillStyle='#6e2f8b'; 
+  cCtx.fillRect(3,10,10,4);
+  cCtx.fillStyle='#2b1b17'; 
+  cCtx.fillRect(3,2,10,4);
+  cCtx.fillStyle='#000'; 
+  cCtx.fillRect(6,6,2,2); 
+  cCtx.fillRect(10,6,2,2);
+
+  // Mini Skeleton
+  const skelTex = scene.textures.createCanvas('miniSkel', CONFIG.tileSize, CONFIG.tileSize);
+  const sCtx = skelTex.getContext();
+  sCtx.fillStyle='#e0e0e0'; 
+  sCtx.fillRect(5,5,6,6);
+  sCtx.fillStyle='#ffffff';
+  sCtx.fillRect(6,7,2,2);
+  sCtx.fillRect(8,7,2,2);
+  sCtx.fillStyle='#c0c0c0';
+  sCtx.fillRect(5,11,6,3);
+
+  // Stone Golem Boss
+  const golemTex = scene.textures.createCanvas('stoneGolem', CONFIG.tileSize*2, CONFIG.tileSize*2);
+  const gCtx = golemTex.getContext();
+  gCtx.fillStyle='#666666'; 
+  gCtx.fillRect(0,0,CONFIG.tileSize*2,CONFIG.tileSize*2);
+  gCtx.fillStyle='#888888'; 
+  gCtx.fillRect(4,4,24,24);
+  gCtx.fillStyle='#ff4444';
+  gCtx.fillRect(8,10,4,4);
+  gCtx.fillRect(20,10,4,4);
+  gCtx.fillStyle='#444444';
+  gCtx.fillRect(12,20,8,4);
+
+  // Particle
+  const partTex = scene.textures.createCanvas('particle', 4, 4);
+  const pCtx = partTex.getContext();
+  pCtx.fillStyle='#ffdd88'; 
+  pCtx.fillRect(0,0,4,4);
+}
+
+function preload(){}
+
+function create(){
+  checkOrientation();
+  window.addEventListener('orientationchange', checkOrientation);
+  window.addEventListener('resize', checkOrientation);
+  
+  createTileTextures(this);
+  mapData = generateMaze(CONFIG.cols, CONFIG.rows);
+  mapLayer = this.add.layer();
+  drawMap(this);
+  
+  const start = findFirstFloor(mapData);
+  player = this.add.sprite(start.x*CONFIG.tileSize + CONFIG.tileSize/2, start.y*CONFIG.tileSize + CONFIG.tileSize/2, 'chibi');
+  player.setDepth(10);
+  player.hp = playerHP;
+  
+  const goal = findFarthestCell(start, mapData);
+  bedPos = { x: goal.x, y: goal.y };
+  drawBed(this, bedPos.x, bedPos.y);
+  
+  const cam = this.cameras.main;
+  cam.setBounds(0,0,mapW,mapH);
+  cam.startFollow(player, true, 0.12, 0.12);
+  
+  scoreText = this.add.text(10, 10, 'Score: 0', { font: '12px monospace', fill: '#ffd700' }).setScrollFactor(0).setDepth(100);
+  hpText = this.add.text(10, 28, 'HP: 100', { font: '12px monospace', fill: '#ff6b6b' }).setScrollFactor(0).setDepth(100);
+  msgText = this.add.text(CONFIG.viewW/2, 50, '', { font: '11px monospace', align:'center', fill:'#8ad3ff' }).setScrollFactor(0).setOrigin(0.5).setDepth(100);
+  
+  cursors = this.input.keyboard.createCursorKeys();
+  createDPad(this);
+  spawnEnemies(this);
+  spawnBoss(this);
+  
+  particles = this.add.particles('particle');
+  
+  this.time.addEvent({ delay: 5000, loop: true, callback: () => { 
+    if (!moving && Math.random() < 0.3) showMessage(this, randomMessage()); 
+  }});
+}
+
+function update(){
+  if (moving) return;
+  const left = cursors.left.isDown || (dpadButtons.left && dpadButtons.left.isDown);
+  const right = cursors.right.isDown || (dpadButtons.right && dpadButtons.right.isDown);
+  const up = cursors.up.isDown || (dpadButtons.up && dpadButtons.up.isDown);
+  const down = cursors.down.isDown || (dpadButtons.down && dpadButtons.down.isDown);
+  
+  if (left) attemptMove(this, -1,0);
+  else if (right) attemptMove(this, 1,0);
+  else if (up) attemptMove(this, 0,-1);
+  else if (down) attemptMove(this, 0,1);
+  
+  enemies.forEach(e=>moveEnemy(this, e));
+  if(boss && boss.active) moveBoss(this);
+}
+
+function drawMap(scene){
+  for(let row=0; row<CONFIG.rows; row++){
+    for(let col=0; col<CONFIG.cols; col++){
+      const tile = mapData[row][col] === 0 ? 'floor' : 'wall';
+      scene.add.image(col*CONFIG.tileSize, row*CONFIG.tileSize, tile).setOrigin(0).setDepth(0);
+    }
+  }
+}
+
+function drawBed(scene, x, y){
+  bedSprite = scene.add.sprite(x*CONFIG.tileSize + CONFIG.tileSize/2, y*CONFIG.tileSize + CONFIG.tileSize/2, 'bed');
+  bedSprite.setDepth(5);
+  glowTween = scene.tweens.add({
+    targets: bedSprite,
+    alpha: 0.5,
+    duration: 1000,
+    yoyo: true,
+    repeat: -1
+  });
+}
+
+function findFirstFloor(maze){
+  for(let row=0; row<maze.length; row++){
+    for(let col=0; col<maze[0].length; col++){
+      if(maze[row][col]===0) return {x:col, y:row};
+    }
+  }
+  return {x:1, y:1};
+}
+
+function findFarthestCell(start, maze){
+  const queue = [{x:start.x, y:start.y, dist:0}];
+  const visited = new Set();
+  visited.add(`${start.x},${start.y}`);
+  let farthest = start;
+  let maxDist = 0;
+  
+  while(queue.length>0){
+    const {x,y,dist} = queue.shift();
+    if(dist > maxDist){
+      maxDist = dist;
+      farthest = {x,y};
+    }
+    [[0,1],[1,0],[0,-1],[-1,0]].forEach(([dx,dy])=>{
+      const nx=x+dx, ny=y+dy;
+      const key=`${nx},${ny}`;
+      if(nx>=0 && ny>=0 && nx<CONFIG.cols && ny<CONFIG.rows && maze[ny][nx]===0 && !visited.has(key)){
+        visited.add(key);
+        queue.push({x:nx,y:ny,dist:dist+1});
+      }
+    });
+  }
+  return farthest;
+}
+
+function attemptMove(scene, dx, dy){
+  const tileX = Math.floor(player.x / CONFIG.tileSize);
+  const tileY = Math.floor(player.y / CONFIG.tileSize);
+  const newX = tileX + dx;
+  const newY = tileY + dy;
+  
+  if(newX<0 || newY<0 || newX>=CONFIG.cols || newY>=CONFIG.rows || mapData[newY][newX]===1) return;
+  
+  moving = true;
+  scene.tweens.add({
+    targets: player,
+    x: newX*CONFIG.tileSize + CONFIG.tileSize/2,
+    y: newY*CONFIG.tileSize + CONFIG.tileSize/2,
+    duration: 150,
+    onComplete: ()=>{
+      moving = false;
+      checkBedCollision(scene);
+      checkEnemyCollision(scene);
+    }
+  });
+}
+
+function checkBedCollision(scene){
+  const tileX = Math.floor(player.x / CONFIG.tileSize);
+  const tileY = Math.floor(player.y / CONFIG.tileSize);
+  if(tileX === bedPos.x && tileY === bedPos.y){
+    winGame(scene);
+  }
+}
+
+function checkEnemyCollision(scene){
+  enemies = enemies.filter(e=>{
+    if(!e.active) return false;
+    const dist = Phaser.Math.Distance.Between(player.x, player.y, e.sprite.x, e.sprite.y);
+    if(dist < CONFIG.tileSize){
+      defeatEnemy(scene, e);
+      return false;
+    }
+    return true;
+  });
+  
+  if(boss && boss.active){
+    const dist = Phaser.Math.Distance.Between(player.x, player.y, boss.sprite.x, boss.sprite.y);
+    if(dist < CONFIG.tileSize*2){
+      defeatBoss(scene);
+    }
+  }
+}
+
+function defeatEnemy(scene, enemy){
+  enemy.active = false;
+  createExplosion(scene, enemy.sprite.x, enemy.sprite.y, '#ffdd88');
+  enemy.sprite.destroy();
+  score += 10;
+  scoreText.setText('Score: ' + score);
+  showMessage(scene, '+10 points!');
+}
+
+function defeatBoss(scene){
+  boss.hp -= 25;
+  createExplosion(scene, boss.sprite.x, boss.sprite.y, '#ff6666');
+  showMessage(scene, 'Hit! Boss HP: ' + boss.hp);
+  
+  if(boss.hp <= 0){
+    boss.active = false;
+    boss.sprite.destroy();
+    score += 100;
+    scoreText.setText('Score: ' + score);
+    showMessage(scene, 'BOSS DEFEATED! +100 points!');
+  }
+}
+
+function createExplosion(scene, x, y, color){
+  const emitter = particles.createEmitter({
+    x: x,
+    y: y,
+    speed: {min: 50, max: 150},
+    angle: {min: 0, max: 360},
+    scale: {start: 0.8, end: 0},
+    lifespan: 400,
+    quantity: 8,
+    tint: Phaser.Display.Color.HexStringToColor(color).color
+  });
+  scene.time.delayedCall(500, ()=>emitter.stop());
+}
+
+function spawnEnemies(scene){
+  const floorTiles = [];
+  for(let row=0; row<CONFIG.rows; row++){
+    for(let col=0; col<CONFIG.cols; col++){
+      if(mapData[row][col]===0){
+        const dist = Phaser.Math.Distance.Between(col, row, bedPos.x, bedPos.y);
+        if(dist > 5) floorTiles.push({x:col, y:row});
+      }
+    }
+  }
+  
+  for(let i=0; i<8; i++){
+    if(floorTiles.length===0) break;
+    const tile = Phaser.Math.RND.pick(floorTiles);
+    const idx = floorTiles.indexOf(tile);
+    floorTiles.splice(idx, 1);
+    
+    const spr = scene.add.sprite(tile.x*CONFIG.tileSize+CONFIG.tileSize/2, tile.y*CONFIG.tileSize+CONFIG.tileSize/2, 'miniSkel');
+    spr.setDepth(8);
+    enemies.push({sprite:spr, active:true, lastMove:0});
+  }
+}
+
+function spawnBoss(scene){
+  const floorTiles = [];
+  for(let row=1; row<CONFIG.rows-2; row++){
+    for(let col=1; col<CONFIG.cols-2; col++){
+      if(mapData[row][col]===0 && mapData[row+1][col]===0 && mapData[row][col+1]===0 && mapData[row+1][col+1]===0){
+        const dist = Phaser.Math.Distance.Between(col, row, bedPos.x, bedPos.y);
+        if(dist > 8 && dist < 15) floorTiles.push({x:col, y:row});
+      }
+    }
+  }
+  
+  if(floorTiles.length>0){
+    const tile = Phaser.Math.RND.pick(floorTiles);
+    const spr = scene.add.sprite(tile.x*CONFIG.tileSize+CONFIG.tileSize, tile.y*CONFIG.tileSize+CONFIG.tileSize, 'stoneGolem');
+    spr.setDepth(9);
+    boss = {sprite:spr, active:true, lastMove:0, hp:100};
+  }
+}
+
+function moveEnemy(scene, enemy){
+  if(scene.time.now - enemy.lastMove < 800) return;
+  enemy.lastMove = scene.time.now;
+  
+  const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+  const dir = Phaser.Math.RND.pick(dirs);
+  const tileX = Math.floor(enemy.sprite.x / CONFIG.tileSize);
+  const tileY = Math.floor(enemy.sprite.y / CONFIG.tileSize);
+  const newX = tileX + dir[0];
+  const newY = tileY + dir[1];
+  
+  if(newX>=0 && newY>=0 && newX<CONFIG.cols && newY<CONFIG.rows && mapData[newY][newX]===0){
+    scene.tweens.add({
+      targets: enemy.sprite,
+      x: newX*CONFIG.tileSize + CONFIG.tileSize/2,
+      y: newY*CONFIG.tileSize + CONFIG.tileSize/2,
+      duration: 200
+    });
+  }
+}
+
+function moveBoss(scene){
+  if(scene.time.now - boss.lastMove < 1200) return;
+  boss.lastMove = scene.time.now;
+  
+  const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+  const dir = Phaser.Math.RND.pick(dirs);
+  const tileX = Math.floor(boss.sprite.x / CONFIG.tileSize) - 1;
+  const tileY = Math.floor(boss.sprite.y / CONFIG.tileSize) - 1;
+  const newX = tileX + dir[0];
+  const newY = tileY + dir[1];
+  
+  if(newX>=0 && newY>=0 && newX<CONFIG.cols-1 && newY<CONFIG.rows-1 && 
+     mapData[newY][newX]===0 && mapData[newY+1][newX]===0 && 
+     mapData[newY][newX+1]===0 && mapData[newY+1][newX+1]===0){
+    scene.tweens.add({
+      targets: boss.sprite,
+      x: newX*CONFIG.tileSize + CONFIG.tileSize,
+      y: newY*CONFIG.tileSize + CONFIG.tileSize,
+      duration: 300
+    });
+  }
+}
+
+function winGame(scene){
+  moving = true;
+  scene.cameras.main.flash(1000, 138, 211, 255);
+  showMessage(scene, '🌟 Sweet Dreams! 🌟');
+  scene.time.delayedCall(1500, ()=>{
+    scene.scene.restart();
+    score = 0;
+    playerHP = 100;
+  });
+}
+
+function createDPad(scene){
+  const btnSize = 50;
+  const gap = 10;
+  const baseY = CONFIG.viewH - btnSize - gap;
+  const centerX = CONFIG.viewW/2;
+  
+  const btnStyle = {fontSize:'24px', padding:'10px'};
+  
+  dpadButtons.up = scene.add.text(centerX, baseY-btnSize-gap, '▲', btnStyle).setOrigin(0.5).setScrollFactor(0).setDepth(200).setInteractive().setAlpha(0.6);
+  dpadButtons.down = scene.add.text(centerX, baseY, '▼', btnStyle).setOrigin(0.5).setScrollFactor(0).setDepth(200).setInteractive().setAlpha(0.6);
+  dpadButtons.left = scene.add.text(centerX-btnSize-gap, baseY-btnSize/2-gap/2, '◀', btnStyle).setOrigin(0.5).setScrollFactor(0).setDepth(200).setInteractive().setAlpha(0.6);
+  dpadButtons.right = scene.add.text(centerX+btnSize+gap, baseY-btnSize/2-gap/2, '▶', btnStyle).setOrigin(0.5).setScrollFactor(0).setDepth(200).setInteractive().setAlpha(0.6);
+  
+  Object.values(dpadButtons).forEach(btn=>{
+    btn.isDown = false;
+    btn.on('pointerdown', ()=>{btn.isDown=true; btn.setAlpha(1);});
+    btn.on('pointerup', ()=>{btn.isDown=false; btn.setAlpha(0.6);});
+    btn.on('pointerout', ()=>{btn.isDown=false; btn.setAlpha(0.6);});
+  });
+}
+
+function showMessage(scene, text){
+  msgText.setText(text);
+  msgText.setAlpha(1);
+  scene.tweens.add({targets:msgText, alpha:0, duration:2000, delay:1000});
+}
+
+function randomMessage(){
+  return Phaser.Math.RND.pick(CONFIG.messages);
+}
+</script>
+</body>
+</html>
