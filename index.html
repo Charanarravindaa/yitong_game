@@ -27,7 +27,6 @@ const CONFIG = {
   viewH: 480,
   cols: 21,
   rows: 31,
-  pixelArt: true,
   messages: [
     "You've done enough today 🌙",
     "Take a deep breath — you're safe here",
@@ -42,9 +41,9 @@ const CONFIG = {
 const mapW = CONFIG.cols * CONFIG.tileSize;
 const mapH = CONFIG.rows * CONFIG.tileSize;
 
-let cursors, player, mapLayer, mapData, dpadButtons = {}, moving = false, msgText, bedPos, bedSprite;
-let enemies = [], boss, score = 0, scoreText, hpText, playerHP = 100;
-let particles, glowTween, gameScene;
+let cursors, player, mapData, dpadButtons = {}, moving = false, msgText, bedPos, bedSprite;
+let enemies = [], boss, score = 0, scoreText, hpText;
+let particles, gameScene;
 
 function checkOrientation(){
   const overlay = document.getElementById('rotateOverlay');
@@ -79,87 +78,85 @@ function generateMaze(cols, rows){
   return maze;
 }
 
-function createTileTextures(scene){
-  // Floor with pattern
-  const floorTex = scene.textures.createCanvas('floor', CONFIG.tileSize, CONFIG.tileSize);
-  const fCtx = floorTex.getContext();
-  fCtx.fillStyle='#1b1b20'; 
-  fCtx.fillRect(0,0,CONFIG.tileSize,CONFIG.tileSize);
-  fCtx.fillStyle='#26262d'; 
-  fCtx.fillRect(0,CONFIG.tileSize-4,CONFIG.tileSize,4);
-  fCtx.fillStyle='#15151a';
-  fCtx.fillRect(1,1,1,1);
-  fCtx.fillRect(14,14,1,1);
-  floorTex.refresh();
+function createFloorTile(scene, x, y){
+  const g = scene.add.graphics();
+  g.fillStyle(0x1b1b20);
+  g.fillRect(0, 0, CONFIG.tileSize, CONFIG.tileSize);
+  g.fillStyle(0x26262d);
+  g.fillRect(0, CONFIG.tileSize-4, CONFIG.tileSize, 4);
+  g.setPosition(x, y);
+  g.setDepth(0);
+  return g;
+}
 
-  // Stone Wall
-  const wallTex = scene.textures.createCanvas('wall', CONFIG.tileSize, CONFIG.tileSize);
-  const wCtx = wallTex.getContext();
-  wCtx.fillStyle='#2f3035'; 
-  wCtx.fillRect(0,0,CONFIG.tileSize,CONFIG.tileSize);
-  wCtx.fillStyle='#3b3c44'; 
-  wCtx.fillRect(2,2,CONFIG.tileSize-4,CONFIG.tileSize-6);
-  wCtx.fillStyle='#25262a';
-  wCtx.fillRect(1,1,2,2);
-  wallTex.refresh();
+function createWallTile(scene, x, y){
+  const g = scene.add.graphics();
+  g.fillStyle(0x2f3035);
+  g.fillRect(0, 0, CONFIG.tileSize, CONFIG.tileSize);
+  g.fillStyle(0x3b3c44);
+  g.fillRect(2, 2, CONFIG.tileSize-4, CONFIG.tileSize-6);
+  g.setPosition(x, y);
+  g.setDepth(0);
+  return g;
+}
 
-  // Glowing Bed
-  const bedTex = scene.textures.createCanvas('bed', CONFIG.tileSize, CONFIG.tileSize);
-  const bCtx = bedTex.getContext();
-  bCtx.fillStyle='#8ad3ff'; 
-  bCtx.fillRect(2,6,12,6);
-  bCtx.fillStyle='#ffffff'; 
-  bCtx.fillRect(2,3,10,3);
-  bCtx.fillStyle='#ffd6a5'; 
-  bCtx.fillRect(10,8,3,3);
-  bedTex.refresh();
+function createPlayer(scene, x, y){
+  const g = scene.add.graphics();
+  g.fillStyle(0xffd6a5);
+  g.fillRect(4, 4, 8, 8);
+  g.fillStyle(0x6e2f8b);
+  g.fillRect(3, 10, 10, 4);
+  g.fillStyle(0x2b1b17);
+  g.fillRect(3, 2, 10, 4);
+  g.fillStyle(0x000000);
+  g.fillRect(6, 6, 2, 2);
+  g.fillRect(10, 6, 2, 2);
+  g.setPosition(x - CONFIG.tileSize/2, y - CONFIG.tileSize/2);
+  g.setDepth(10);
+  return g;
+}
 
-  // Chibi Player
-  const chibiTex = scene.textures.createCanvas('chibi', CONFIG.tileSize, CONFIG.tileSize);
-  const cCtx = chibiTex.getContext();
-  cCtx.fillStyle='#ffd6a5'; 
-  cCtx.fillRect(4,4,8,8);
-  cCtx.fillStyle='#6e2f8b'; 
-  cCtx.fillRect(3,10,10,4);
-  cCtx.fillStyle='#2b1b17'; 
-  cCtx.fillRect(3,2,10,4);
-  cCtx.fillStyle='#000'; 
-  cCtx.fillRect(6,6,2,2); 
-  cCtx.fillRect(10,6,2,2);
-  chibiTex.refresh();
+function createBed(scene, x, y){
+  const g = scene.add.graphics();
+  g.fillStyle(0x8ad3ff);
+  g.fillRect(2, 6, 12, 6);
+  g.fillStyle(0xffffff);
+  g.fillRect(2, 3, 10, 3);
+  g.fillStyle(0xffd6a5);
+  g.fillRect(10, 8, 3, 3);
+  g.setPosition(x - CONFIG.tileSize/2, y - CONFIG.tileSize/2);
+  g.setDepth(5);
+  return g;
+}
 
-  // Mini Skeleton
-  const skelTex = scene.textures.createCanvas('miniSkel', CONFIG.tileSize, CONFIG.tileSize);
-  const sCtx = skelTex.getContext();
-  sCtx.fillStyle='#e0e0e0'; 
-  sCtx.fillRect(5,5,6,6);
-  sCtx.fillStyle='#ffffff';
-  sCtx.fillRect(6,7,2,2);
-  sCtx.fillRect(8,7,2,2);
-  sCtx.fillStyle='#c0c0c0';
-  sCtx.fillRect(5,11,6,3);
-  skelTex.refresh();
+function createEnemy(scene, x, y){
+  const g = scene.add.graphics();
+  g.fillStyle(0xe0e0e0);
+  g.fillRect(5, 5, 6, 6);
+  g.fillStyle(0xffffff);
+  g.fillRect(6, 7, 2, 2);
+  g.fillRect(8, 7, 2, 2);
+  g.fillStyle(0xc0c0c0);
+  g.fillRect(5, 11, 6, 3);
+  g.setPosition(x - CONFIG.tileSize/2, y - CONFIG.tileSize/2);
+  g.setDepth(8);
+  return g;
+}
 
-  // Stone Golem Boss
-  const golemTex = scene.textures.createCanvas('stoneGolem', CONFIG.tileSize*2, CONFIG.tileSize*2);
-  const gCtx = golemTex.getContext();
-  gCtx.fillStyle='#666666'; 
-  gCtx.fillRect(0,0,CONFIG.tileSize*2,CONFIG.tileSize*2);
-  gCtx.fillStyle='#888888'; 
-  gCtx.fillRect(4,4,24,24);
-  gCtx.fillStyle='#ff4444';
-  gCtx.fillRect(8,10,4,4);
-  gCtx.fillRect(20,10,4,4);
-  gCtx.fillStyle='#444444';
-  gCtx.fillRect(12,20,8,4);
-  golemTex.refresh();
-
-  // Particle
-  const partTex = scene.textures.createCanvas('particle', 4, 4);
-  const pCtx = partTex.getContext();
-  pCtx.fillStyle='#ffdd88'; 
-  pCtx.fillRect(0,0,4,4);
-  partTex.refresh();
+function createBoss(scene, x, y){
+  const g = scene.add.graphics();
+  g.fillStyle(0x666666);
+  g.fillRect(0, 0, CONFIG.tileSize*2, CONFIG.tileSize*2);
+  g.fillStyle(0x888888);
+  g.fillRect(4, 4, 24, 24);
+  g.fillStyle(0xff4444);
+  g.fillRect(8, 10, 4, 4);
+  g.fillRect(20, 10, 4, 4);
+  g.fillStyle(0x444444);
+  g.fillRect(12, 20, 8, 4);
+  g.setPosition(x - CONFIG.tileSize, y - CONFIG.tileSize);
+  g.setDepth(9);
+  return g;
 }
 
 function preload(){
@@ -174,29 +171,33 @@ function create(){
   window.addEventListener('orientationchange', checkOrientation);
   window.addEventListener('resize', checkOrientation);
   
-  createTileTextures(this);
-  console.log('Textures created');
-  
   mapData = generateMaze(CONFIG.cols, CONFIG.rows);
   console.log('Maze generated');
   
-  mapLayer = this.add.layer();
   drawMap(this);
   console.log('Map drawn');
   
   const start = findFirstFloor(mapData);
-  player = this.add.sprite(start.x*CONFIG.tileSize + CONFIG.tileSize/2, start.y*CONFIG.tileSize + CONFIG.tileSize/2, 'chibi');
-  player.setDepth(10);
-  player.hp = playerHP;
+  player = createPlayer(this, start.x*CONFIG.tileSize + CONFIG.tileSize/2, start.y*CONFIG.tileSize + CONFIG.tileSize/2);
+  player.tileX = start.x;
+  player.tileY = start.y;
   console.log('Player created at', start);
   
   const goal = findFarthestCell(start, mapData);
   bedPos = { x: goal.x, y: goal.y };
-  drawBed(this, bedPos.x, bedPos.y);
+  bedSprite = createBed(this, bedPos.x * CONFIG.tileSize + CONFIG.tileSize/2, bedPos.y * CONFIG.tileSize + CONFIG.tileSize/2);
+  
+  this.tweens.add({
+    targets: bedSprite,
+    alpha: 0.5,
+    duration: 1000,
+    yoyo: true,
+    repeat: -1
+  });
   console.log('Bed placed at', bedPos);
   
   const cam = this.cameras.main;
-  cam.setBounds(0,0,mapW,mapH);
+  cam.setBounds(0, 0, mapW, mapH);
   cam.startFollow(player, true, 0.12, 0.12);
   
   scoreText = this.add.text(10, 10, 'Score: 0', { font: '12px monospace', fill: '#ffd700' }).setScrollFactor(0).setDepth(100);
@@ -207,8 +208,6 @@ function create(){
   createDPad(this);
   spawnEnemies(this);
   spawnBoss(this);
-  
-  particles = this.add.particles('particle');
   
   this.time.addEvent({ delay: 5000, loop: true, callback: () => { 
     if (!moving && Math.random() < 0.3) showMessage(this, randomMessage()); 
@@ -224,37 +223,25 @@ function update(){
   const up = cursors.up.isDown || (dpadButtons.up && dpadButtons.up.isDown);
   const down = cursors.down.isDown || (dpadButtons.down && dpadButtons.down.isDown);
   
-  if (left) attemptMove(gameScene, -1,0);
-  else if (right) attemptMove(gameScene, 1,0);
-  else if (up) attemptMove(gameScene, 0,-1);
-  else if (down) attemptMove(gameScene, 0,1);
+  if (left) attemptMove(gameScene, -1, 0);
+  else if (right) attemptMove(gameScene, 1, 0);
+  else if (up) attemptMove(gameScene, 0, -1);
+  else if (down) attemptMove(gameScene, 0, 1);
   
-  enemies.forEach(e=>moveEnemy(gameScene, e));
+  enemies.forEach(e => moveEnemy(gameScene, e));
   if(boss && boss.active) moveBoss(gameScene);
 }
 
 function drawMap(scene){
   for(let row=0; row<CONFIG.rows; row++){
     for(let col=0; col<CONFIG.cols; col++){
-      const tile = mapData[row][col] === 0 ? 'floor' : 'wall';
-      const img = scene.add.image(col*CONFIG.tileSize, row*CONFIG.tileSize, tile);
-      img.setOrigin(0);
-      img.setDepth(0);
-      mapLayer.add(img);
+      if(mapData[row][col] === 0){
+        createFloorTile(scene, col*CONFIG.tileSize, row*CONFIG.tileSize);
+      } else {
+        createWallTile(scene, col*CONFIG.tileSize, row*CONFIG.tileSize);
+      }
     }
   }
-}
-
-function drawBed(scene, x, y){
-  bedSprite = scene.add.sprite(x*CONFIG.tileSize + CONFIG.tileSize/2, y*CONFIG.tileSize + CONFIG.tileSize/2, 'bed');
-  bedSprite.setDepth(5);
-  glowTween = scene.tweens.add({
-    targets: bedSprite,
-    alpha: 0.5,
-    duration: 1000,
-    yoyo: true,
-    repeat: -1
-  });
 }
 
 function findFirstFloor(maze){
@@ -292,18 +279,19 @@ function findFarthestCell(start, maze){
 }
 
 function attemptMove(scene, dx, dy){
-  const tileX = Math.floor(player.x / CONFIG.tileSize);
-  const tileY = Math.floor(player.y / CONFIG.tileSize);
-  const newX = tileX + dx;
-  const newY = tileY + dy;
+  const newX = player.tileX + dx;
+  const newY = player.tileY + dy;
   
   if(newX<0 || newY<0 || newX>=CONFIG.cols || newY>=CONFIG.rows || mapData[newY][newX]===1) return;
   
   moving = true;
+  player.tileX = newX;
+  player.tileY = newY;
+  
   scene.tweens.add({
     targets: player,
-    x: newX*CONFIG.tileSize + CONFIG.tileSize/2,
-    y: newY*CONFIG.tileSize + CONFIG.tileSize/2,
+    x: newX*CONFIG.tileSize,
+    y: newY*CONFIG.tileSize,
     duration: 150,
     onComplete: ()=>{
       moving = false;
@@ -314,9 +302,7 @@ function attemptMove(scene, dx, dy){
 }
 
 function checkBedCollision(scene){
-  const tileX = Math.floor(player.x / CONFIG.tileSize);
-  const tileY = Math.floor(player.y / CONFIG.tileSize);
-  if(tileX === bedPos.x && tileY === bedPos.y){
+  if(player.tileX === bedPos.x && player.tileY === bedPos.y){
     winGame(scene);
   }
 }
@@ -324,8 +310,7 @@ function checkBedCollision(scene){
 function checkEnemyCollision(scene){
   enemies = enemies.filter(e=>{
     if(!e.active) return false;
-    const dist = Phaser.Math.Distance.Between(player.x, player.y, e.sprite.x, e.sprite.y);
-    if(dist < CONFIG.tileSize){
+    if(e.tileX === player.tileX && e.tileY === player.tileY){
       defeatEnemy(scene, e);
       return false;
     }
@@ -333,8 +318,9 @@ function checkEnemyCollision(scene){
   });
   
   if(boss && boss.active){
-    const dist = Phaser.Math.Distance.Between(player.x, player.y, boss.sprite.x, boss.sprite.y);
-    if(dist < CONFIG.tileSize*2){
+    const bx = Math.floor(boss.sprite.x / CONFIG.tileSize);
+    const by = Math.floor(boss.sprite.y / CONFIG.tileSize);
+    if((player.tileX === bx || player.tileX === bx+1) && (player.tileY === by || player.tileY === by+1)){
       defeatBoss(scene);
     }
   }
@@ -342,7 +328,7 @@ function checkEnemyCollision(scene){
 
 function defeatEnemy(scene, enemy){
   enemy.active = false;
-  createExplosion(scene, enemy.sprite.x, enemy.sprite.y, '#ffdd88');
+  createExplosion(scene, enemy.sprite.x + CONFIG.tileSize/2, enemy.sprite.y + CONFIG.tileSize/2);
   enemy.sprite.destroy();
   score += 10;
   scoreText.setText('Score: ' + score);
@@ -351,7 +337,7 @@ function defeatEnemy(scene, enemy){
 
 function defeatBoss(scene){
   boss.hp -= 25;
-  createExplosion(scene, boss.sprite.x, boss.sprite.y, '#ff6666');
+  createExplosion(scene, boss.sprite.x + CONFIG.tileSize, boss.sprite.y + CONFIG.tileSize);
   showMessage(scene, 'Hit! Boss HP: ' + boss.hp);
   
   if(boss.hp <= 0){
@@ -363,18 +349,24 @@ function defeatBoss(scene){
   }
 }
 
-function createExplosion(scene, x, y, color){
-  const emitter = particles.createEmitter({
-    x: x,
-    y: y,
-    speed: {min: 50, max: 150},
-    angle: {min: 0, max: 360},
-    scale: {start: 0.8, end: 0},
-    lifespan: 400,
-    quantity: 8,
-    tint: Phaser.Display.Color.HexStringToColor(color).color
-  });
-  scene.time.delayedCall(500, ()=>emitter.stop());
+function createExplosion(scene, x, y){
+  for(let i=0; i<8; i++){
+    const angle = (i / 8) * Math.PI * 2;
+    const g = scene.add.graphics();
+    g.fillStyle(0xffdd88);
+    g.fillRect(0, 0, 4, 4);
+    g.setPosition(x, y);
+    g.setDepth(50);
+    
+    scene.tweens.add({
+      targets: g,
+      x: x + Math.cos(angle) * 30,
+      y: y + Math.sin(angle) * 30,
+      alpha: 0,
+      duration: 400,
+      onComplete: () => g.destroy()
+    });
+  }
 }
 
 function spawnEnemies(scene){
@@ -394,9 +386,8 @@ function spawnEnemies(scene){
     const idx = floorTiles.indexOf(tile);
     floorTiles.splice(idx, 1);
     
-    const spr = scene.add.sprite(tile.x*CONFIG.tileSize+CONFIG.tileSize/2, tile.y*CONFIG.tileSize+CONFIG.tileSize/2, 'miniSkel');
-    spr.setDepth(8);
-    enemies.push({sprite:spr, active:true, lastMove:0});
+    const spr = createEnemy(scene, tile.x*CONFIG.tileSize+CONFIG.tileSize/2, tile.y*CONFIG.tileSize+CONFIG.tileSize/2);
+    enemies.push({sprite:spr, active:true, lastMove:0, tileX:tile.x, tileY:tile.y});
   }
 }
 
@@ -413,9 +404,8 @@ function spawnBoss(scene){
   
   if(floorTiles.length>0){
     const tile = Phaser.Math.RND.pick(floorTiles);
-    const spr = scene.add.sprite(tile.x*CONFIG.tileSize+CONFIG.tileSize, tile.y*CONFIG.tileSize+CONFIG.tileSize, 'stoneGolem');
-    spr.setDepth(9);
-    boss = {sprite:spr, active:true, lastMove:0, hp:100};
+    const spr = createBoss(scene, tile.x*CONFIG.tileSize+CONFIG.tileSize, tile.y*CONFIG.tileSize+CONFIG.tileSize);
+    boss = {sprite:spr, active:true, lastMove:0, hp:100, tileX:tile.x, tileY:tile.y};
   }
 }
 
@@ -425,16 +415,16 @@ function moveEnemy(scene, enemy){
   
   const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
   const dir = Phaser.Math.RND.pick(dirs);
-  const tileX = Math.floor(enemy.sprite.x / CONFIG.tileSize);
-  const tileY = Math.floor(enemy.sprite.y / CONFIG.tileSize);
-  const newX = tileX + dir[0];
-  const newY = tileY + dir[1];
+  const newX = enemy.tileX + dir[0];
+  const newY = enemy.tileY + dir[1];
   
   if(newX>=0 && newY>=0 && newX<CONFIG.cols && newY<CONFIG.rows && mapData[newY][newX]===0){
+    enemy.tileX = newX;
+    enemy.tileY = newY;
     scene.tweens.add({
       targets: enemy.sprite,
-      x: newX*CONFIG.tileSize + CONFIG.tileSize/2,
-      y: newY*CONFIG.tileSize + CONFIG.tileSize/2,
+      x: newX*CONFIG.tileSize,
+      y: newY*CONFIG.tileSize,
       duration: 200
     });
   }
@@ -446,18 +436,18 @@ function moveBoss(scene){
   
   const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
   const dir = Phaser.Math.RND.pick(dirs);
-  const tileX = Math.floor(boss.sprite.x / CONFIG.tileSize) - 1;
-  const tileY = Math.floor(boss.sprite.y / CONFIG.tileSize) - 1;
-  const newX = tileX + dir[0];
-  const newY = tileY + dir[1];
+  const newX = boss.tileX + dir[0];
+  const newY = boss.tileY + dir[1];
   
   if(newX>=0 && newY>=0 && newX<CONFIG.cols-1 && newY<CONFIG.rows-1 && 
      mapData[newY][newX]===0 && mapData[newY+1][newX]===0 && 
      mapData[newY][newX+1]===0 && mapData[newY+1][newX+1]===0){
+    boss.tileX = newX;
+    boss.tileY = newY;
     scene.tweens.add({
       targets: boss.sprite,
-      x: newX*CONFIG.tileSize + CONFIG.tileSize,
-      y: newY*CONFIG.tileSize + CONFIG.tileSize,
+      x: newX*CONFIG.tileSize,
+      y: newY*CONFIG.tileSize,
       duration: 300
     });
   }
@@ -470,7 +460,6 @@ function winGame(scene){
   scene.time.delayedCall(1500, ()=>{
     scene.scene.restart();
     score = 0;
-    playerHP = 100;
     enemies = [];
     boss = null;
   });
@@ -512,7 +501,7 @@ const game = new Phaser.Game({
   parent: 'game-container',
   width: CONFIG.viewW,
   height: CONFIG.viewH,
-  pixelArt: CONFIG.pixelArt,
+  pixelArt: true,
   backgroundColor: '#040408',
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   physics: { default: 'arcade', arcade: { debug: false } },
