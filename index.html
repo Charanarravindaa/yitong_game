@@ -42,21 +42,9 @@ const CONFIG = {
 const mapW = CONFIG.cols * CONFIG.tileSize;
 const mapH = CONFIG.rows * CONFIG.tileSize;
 
-const game = new Phaser.Game({
-  type: Phaser.AUTO,
-  parent: 'game-container',
-  width: CONFIG.viewW,
-  height: CONFIG.viewH,
-  pixelArt: CONFIG.pixelArt,
-  backgroundColor: '#040408',
-  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  physics: { default: 'arcade', arcade: { debug: false } },
-  scene: { preload, create, update }
-});
-
 let cursors, player, mapLayer, mapData, dpadButtons = {}, moving = false, msgText, bedPos, bedSprite;
 let enemies = [], boss, score = 0, scoreText, hpText, playerHP = 100;
-let particles, glowTween;
+let particles, glowTween, gameScene;
 
 function checkOrientation(){
   const overlay = document.getElementById('rotateOverlay');
@@ -102,6 +90,7 @@ function createTileTextures(scene){
   fCtx.fillStyle='#15151a';
   fCtx.fillRect(1,1,1,1);
   fCtx.fillRect(14,14,1,1);
+  floorTex.refresh();
 
   // Stone Wall
   const wallTex = scene.textures.createCanvas('wall', CONFIG.tileSize, CONFIG.tileSize);
@@ -112,6 +101,7 @@ function createTileTextures(scene){
   wCtx.fillRect(2,2,CONFIG.tileSize-4,CONFIG.tileSize-6);
   wCtx.fillStyle='#25262a';
   wCtx.fillRect(1,1,2,2);
+  wallTex.refresh();
 
   // Glowing Bed
   const bedTex = scene.textures.createCanvas('bed', CONFIG.tileSize, CONFIG.tileSize);
@@ -122,6 +112,7 @@ function createTileTextures(scene){
   bCtx.fillRect(2,3,10,3);
   bCtx.fillStyle='#ffd6a5'; 
   bCtx.fillRect(10,8,3,3);
+  bedTex.refresh();
 
   // Chibi Player
   const chibiTex = scene.textures.createCanvas('chibi', CONFIG.tileSize, CONFIG.tileSize);
@@ -135,6 +126,7 @@ function createTileTextures(scene){
   cCtx.fillStyle='#000'; 
   cCtx.fillRect(6,6,2,2); 
   cCtx.fillRect(10,6,2,2);
+  chibiTex.refresh();
 
   // Mini Skeleton
   const skelTex = scene.textures.createCanvas('miniSkel', CONFIG.tileSize, CONFIG.tileSize);
@@ -146,6 +138,7 @@ function createTileTextures(scene){
   sCtx.fillRect(8,7,2,2);
   sCtx.fillStyle='#c0c0c0';
   sCtx.fillRect(5,11,6,3);
+  skelTex.refresh();
 
   // Stone Golem Boss
   const golemTex = scene.textures.createCanvas('stoneGolem', CONFIG.tileSize*2, CONFIG.tileSize*2);
@@ -159,34 +152,48 @@ function createTileTextures(scene){
   gCtx.fillRect(20,10,4,4);
   gCtx.fillStyle='#444444';
   gCtx.fillRect(12,20,8,4);
+  golemTex.refresh();
 
   // Particle
   const partTex = scene.textures.createCanvas('particle', 4, 4);
   const pCtx = partTex.getContext();
   pCtx.fillStyle='#ffdd88'; 
   pCtx.fillRect(0,0,4,4);
+  partTex.refresh();
 }
 
-function preload(){}
+function preload(){
+  console.log('Preload started');
+}
 
 function create(){
+  console.log('Create started');
+  gameScene = this;
+  
   checkOrientation();
   window.addEventListener('orientationchange', checkOrientation);
   window.addEventListener('resize', checkOrientation);
   
   createTileTextures(this);
+  console.log('Textures created');
+  
   mapData = generateMaze(CONFIG.cols, CONFIG.rows);
+  console.log('Maze generated');
+  
   mapLayer = this.add.layer();
   drawMap(this);
+  console.log('Map drawn');
   
   const start = findFirstFloor(mapData);
   player = this.add.sprite(start.x*CONFIG.tileSize + CONFIG.tileSize/2, start.y*CONFIG.tileSize + CONFIG.tileSize/2, 'chibi');
   player.setDepth(10);
   player.hp = playerHP;
+  console.log('Player created at', start);
   
   const goal = findFarthestCell(start, mapData);
   bedPos = { x: goal.x, y: goal.y };
   drawBed(this, bedPos.x, bedPos.y);
+  console.log('Bed placed at', bedPos);
   
   const cam = this.cameras.main;
   cam.setBounds(0,0,mapW,mapH);
@@ -206,6 +213,8 @@ function create(){
   this.time.addEvent({ delay: 5000, loop: true, callback: () => { 
     if (!moving && Math.random() < 0.3) showMessage(this, randomMessage()); 
   }});
+  
+  console.log('Game setup complete');
 }
 
 function update(){
@@ -215,20 +224,23 @@ function update(){
   const up = cursors.up.isDown || (dpadButtons.up && dpadButtons.up.isDown);
   const down = cursors.down.isDown || (dpadButtons.down && dpadButtons.down.isDown);
   
-  if (left) attemptMove(this, -1,0);
-  else if (right) attemptMove(this, 1,0);
-  else if (up) attemptMove(this, 0,-1);
-  else if (down) attemptMove(this, 0,1);
+  if (left) attemptMove(gameScene, -1,0);
+  else if (right) attemptMove(gameScene, 1,0);
+  else if (up) attemptMove(gameScene, 0,-1);
+  else if (down) attemptMove(gameScene, 0,1);
   
-  enemies.forEach(e=>moveEnemy(this, e));
-  if(boss && boss.active) moveBoss(this);
+  enemies.forEach(e=>moveEnemy(gameScene, e));
+  if(boss && boss.active) moveBoss(gameScene);
 }
 
 function drawMap(scene){
   for(let row=0; row<CONFIG.rows; row++){
     for(let col=0; col<CONFIG.cols; col++){
       const tile = mapData[row][col] === 0 ? 'floor' : 'wall';
-      scene.add.image(col*CONFIG.tileSize, row*CONFIG.tileSize, tile).setOrigin(0).setDepth(0);
+      const img = scene.add.image(col*CONFIG.tileSize, row*CONFIG.tileSize, tile);
+      img.setOrigin(0);
+      img.setDepth(0);
+      mapLayer.add(img);
     }
   }
 }
@@ -459,6 +471,8 @@ function winGame(scene){
     scene.scene.restart();
     score = 0;
     playerHP = 100;
+    enemies = [];
+    boss = null;
   });
 }
 
@@ -468,7 +482,7 @@ function createDPad(scene){
   const baseY = CONFIG.viewH - btnSize - gap;
   const centerX = CONFIG.viewW/2;
   
-  const btnStyle = {fontSize:'24px', padding:'10px'};
+  const btnStyle = {fontSize:'24px', padding:'10px', fill:'#ffffff'};
   
   dpadButtons.up = scene.add.text(centerX, baseY-btnSize-gap, '▲', btnStyle).setOrigin(0.5).setScrollFactor(0).setDepth(200).setInteractive().setAlpha(0.6);
   dpadButtons.down = scene.add.text(centerX, baseY, '▼', btnStyle).setOrigin(0.5).setScrollFactor(0).setDepth(200).setInteractive().setAlpha(0.6);
@@ -492,6 +506,20 @@ function showMessage(scene, text){
 function randomMessage(){
   return Phaser.Math.RND.pick(CONFIG.messages);
 }
+
+const game = new Phaser.Game({
+  type: Phaser.AUTO,
+  parent: 'game-container',
+  width: CONFIG.viewW,
+  height: CONFIG.viewH,
+  pixelArt: CONFIG.pixelArt,
+  backgroundColor: '#040408',
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+  physics: { default: 'arcade', arcade: { debug: false } },
+  scene: { preload, create, update }
+});
+
+console.log('Game initialized');
 </script>
 </body>
 </html>
